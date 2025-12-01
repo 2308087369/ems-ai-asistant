@@ -153,7 +153,7 @@ export default function EnergyDashboard() {
                 <span className="text-xs text-zinc-500">实时监控中</span>
               </div>
               <div className="text-xs text-zinc-500 font-mono">更新于 {lastUpdate}</div>
-              <div className="h-4 w-[1px] bg-zinc-800 mx-2"></div>
+              <div className="h-4 w-px bg-zinc-800 mx-2"></div>
               <Button 
                 variant="ghost" 
                 size="sm" 

@@ -52,13 +52,13 @@ export default function LoginPage() {
       </div>
 
       {/* Grid Pattern Overlay */}
-      <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center [mask-image:linear-gradient(180deg,white,rgba(255,255,255,0))]" />
+      <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center mask-[linear-gradient(180deg,white,rgba(255,255,255,0))]" />
 
       {/* Login Card */}
       <div className="w-full max-w-md z-10 p-6 animate-in fade-in zoom-in duration-500">
         <div className="bg-zinc-900/80 backdrop-blur-xl border border-zinc-800/50 rounded-2xl shadow-2xl p-8 relative overflow-hidden group">
           {/* Top Highlight */}
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500/0 via-emerald-500/50 to-emerald-500/0" />
+          <div className="absolute top-0 left-0 w-full h-1 bg-linear-to-r from-emerald-500/0 via-emerald-500/50 to-emerald-500/0" />
           
           {/* Header */}
           <div className="text-center mb-8">
