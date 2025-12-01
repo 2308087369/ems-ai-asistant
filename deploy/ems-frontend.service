@@ -1,0 +1,16 @@
+[Unit]
+Description=EMS Frontend (Next.js) on port 8905
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/gcl/my_project/EMS_main_screen/font
+Environment=NODE_ENV=production
+Environment=PORT=8905
+ExecStart=/gcl/my_project/EMS_main_screen/font/node_modules/.bin/next start
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+
