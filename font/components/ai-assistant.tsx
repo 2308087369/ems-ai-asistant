@@ -101,53 +101,161 @@ export function AIAssistant({ siteData, lastUpdate, isOpen, onOpenChange, initia
     }
   }, [isOpen, initialVoiceMode])
 
-  // 语音播报函数
-  const speak = useCallback((text: string) => {
+  const ttsWsRef = useRef<WebSocket | null>(null)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const nextAudioStartTimeRef = useRef<number>(0)
+
+  // 语音播报函数 (使用讯飞TTS)
+  const speak = useCallback(async (text: string) => {
     if (typeof window === 'undefined') return
     
     // 移除markdown符号以便朗读
     const cleanText = text.replace(/[#*`]/g, '')
     
-    if ('speechSynthesis' in window) {
-      // 停止之前的播报
-      window.speechSynthesis.cancel()
-      
-      const utterance = new SpeechSynthesisUtterance(cleanText)
-      utterance.lang = 'zh-CN'
-      utterance.rate = 1.2 // 稍微加快语速
-      
-      utterance.onstart = () => {
+    if (!cleanText) return
+
+    try {
+        // 获取鉴权后的WebSocket URL
+        const res = await fetch('/api/tts-auth')
+        const data = await res.json()
+        
+        if (!data.url) {
+            console.error("Failed to get TTS auth url")
+            return
+        }
+
+        const ws = new WebSocket(data.url)
+        ttsWsRef.current = ws
+        
+        if (!audioContextRef.current) {
+            audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)()
+        }
+        // 重置播放时间
+        nextAudioStartTimeRef.current = 0
+
         setIsSpeaking(true)
-        // 播报时不要停止听写，而是保持听写以便随时打断
-        // stopListening() 
-      }
-      
-      utterance.onend = () => {
-        setIsSpeaking(false)
-        // 如果在语音模式下，播报结束后确保继续听写
-        if (isVoiceModeRef.current) {
-          startListening()
+        // 播报时停止听写，避免自己听到自己的声音
+        stopListening()
+
+        ws.onopen = () => {
+            const frame = {
+                "common": {
+                    "app_id": data.app_id
+                },
+                "business": {
+                    "aue": "raw",
+                    "auf": "audio/L16;rate=16000",
+                    "vcn": "x4_yezi", // 小燕
+                    "tte": "UTF8"
+                },
+                "data": {
+                    "text": btoa(unescape(encodeURIComponent(cleanText))),
+                    "status": 2
+                }
+            }
+            ws.send(JSON.stringify(frame))
         }
-      }
-      
-      utterance.onerror = () => {
+
+        ws.onmessage = async (event) => {
+            const res = JSON.parse(event.data as string)
+            if (res.code !== 0) {
+                console.error(`TTS error: ${res.code} ${res.message}`)
+                ws.close()
+                return
+            }
+
+            if (res.data && res.data.audio) {
+                const audioData = atob(res.data.audio)
+                const arrayBuffer = new ArrayBuffer(audioData.length)
+                const view = new Uint8Array(arrayBuffer)
+                for (let i = 0; i < audioData.length; i++) {
+                    view[i] = audioData.charCodeAt(i)
+                }
+                
+                const audioCtx = audioContextRef.current
+                if (!audioCtx) return
+
+                // Create buffer for 16-bit PCM
+                const float32Array = new Float32Array(arrayBuffer.byteLength / 2)
+                const dataView = new DataView(arrayBuffer)
+                for (let i = 0; i < arrayBuffer.byteLength / 2; i++) {
+                    const int16 = dataView.getInt16(i * 2, true) // little-endian
+                    float32Array[i] = int16 / 32768
+                }
+
+                const audioBuffer = audioCtx.createBuffer(1, float32Array.length, 16000)
+                audioBuffer.getChannelData(0).set(float32Array)
+                
+                const source = audioCtx.createBufferSource()
+                source.buffer = audioBuffer
+                source.connect(audioCtx.destination)
+                
+                // 简单的流式播放调度，确保音频块连续播放
+                const currentTime = audioCtx.currentTime
+                if (nextAudioStartTimeRef.current < currentTime) {
+                    nextAudioStartTimeRef.current = currentTime
+                }
+                source.start(nextAudioStartTimeRef.current)
+                nextAudioStartTimeRef.current += audioBuffer.duration
+            }
+
+            if (res.code === 0 && res.data.status === 2) {
+                ws.close()
+                // 计算剩余播放时间，确保状态在播放完成后才切换
+                const audioCtx = audioContextRef.current
+                if (audioCtx) {
+                    const remainingTime = (nextAudioStartTimeRef.current - audioCtx.currentTime) * 1000
+                    setTimeout(() => {
+                         setIsSpeaking(false)
+                         if (isVoiceModeRef.current) {
+                             startListening()
+                         }
+                    }, Math.max(0, remainingTime + 200)) // 多加200ms缓冲
+                } else {
+                     setIsSpeaking(false)
+                     if (isVoiceModeRef.current) {
+                         startListening()
+                     }
+                }
+            }
+        }
+
+        ws.onerror = (e) => {
+            console.error("TTS WebSocket error:", e)
+            setIsSpeaking(false)
+            if (isVoiceModeRef.current) {
+                startListening()
+            }
+        }
+
+        ws.onclose = () => {
+             // managed in onmessage
+        }
+
+    } catch (e) {
+        console.error("TTS setup error:", e)
         setIsSpeaking(false)
         if (isVoiceModeRef.current) {
-          startListening()
+             startListening()
         }
-      }
-      
-      window.speechSynthesis.speak(utterance)
     }
   }, [])
 
   const stopSpeaking = useCallback(() => {
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel()
+      if (ttsWsRef.current) {
+          ttsWsRef.current.close()
+          ttsWsRef.current = null
+      }
+      if (audioContextRef.current) {
+          // 只有在确实需要完全停止时才关闭，或者可以只是suspend
+          // 为了简单起见，这里关闭并置空，下次speak会重建
+          audioContextRef.current.close().then(() => {
+              audioContextRef.current = null
+          })
+      }
+      nextAudioStartTimeRef.current = 0
       setIsSpeaking(false)
-    }
   }, [])
-
   // 初始化语音识别
   useEffect(() => {
     if (typeof window !== "undefined") {
